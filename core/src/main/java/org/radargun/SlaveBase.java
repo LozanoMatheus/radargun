@@ -79,7 +79,8 @@ public abstract class SlaveBase {
                log.error(message);
                response = new DistStageAck(state).error(message, null);
             } else {
-               log.info("Starting stage " + (log.isDebugEnabled() ? stage.toString() : stage.getName()));
+               String stageName = stage.getName();
+               log.info("Starting stage " + (log.isDebugEnabled() ? stage.toString() : stageName));
                long start = System.currentTimeMillis();
                long end;
                try {
@@ -88,14 +89,16 @@ public abstract class SlaveBase {
                   if (response == null) {
                      response = new DistStageAck(state).error("Stage returned null response", null);
                   }
-                  log.info("Finished stage " + stage.getName());
+                  log.info("Finished stage " + stageName);
                   response.setDuration(end - start);
                } catch (Exception e) {
                   end = System.currentTimeMillis();
                   log.error("Stage execution has failed", e);
                   response = new DistStageAck(state).error("Stage execution has failed", e);
+               } finally {
+                  InitHelper.destroy(stage);
                }
-               state.getTimeline().addEvent(Stage.STAGE, new Timeline.IntervalEvent(start, stage.getName(), end - start));
+               state.getTimeline().addEvent(Stage.STAGE, new Timeline.IntervalEvent(start, stageName, end - start));
             }
             sendResponse(response);
          }
