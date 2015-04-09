@@ -39,6 +39,7 @@
       <plugins.coherence/>
       <plugins.process />
       <plugins.spymemcached />
+      <plugins.hibernate-orm />
       <reporter.default />
       <extension.example-extension/>
       <extension.hdrhistogram />
@@ -292,6 +293,21 @@
             <plugins.spymemcached>spymemcached</plugins.spymemcached>
          </properties>
       </profile>
+      <profile>
+         <id>hibernate-orm</id>
+         <activation>
+            <property>
+               <name>hibernate-orm</name>
+            </property>
+         </activation>
+         <modules>
+            <module>plugins/hibernate-orm5</module>
+         </modules>
+         <properties>
+            <plugins.hibernate-orm>hibernate-orm5</plugins.hibernate-orm>
+         </properties>
+      </profile>
+
    </profiles>
 
    <build>
@@ -364,8 +380,9 @@
                         <pathconvert pathsep="," property="core_jar_list" refid="core_jars">
                            <mapper type="flatten" />
                         </pathconvert>
+                        <property name="extensions" value="${extension.example-extension},${extension.hdrhistogram},${extension.jpa}"/>
 
-                        <ac:for list="${extension.example-extension},${extension.hdrhistogram},${extension.jpa}" param="extension" xmlns:ac="antlib:net.sf.antcontrib">
+                        <ac:for list="${extensions}" param="extension" xmlns:ac="antlib:net.sf.antcontrib">
                            <sequential>
                               <echo message="Packaging extension @{extension}..." />
                               <copy todir="${distribution.artifact}/lib">
@@ -447,7 +464,7 @@
                         </path>
 
                         <echo message="Packaging plugins: " />
-                        <ac:for list="${plugins.chm},${plugins.ehcache},${plugins.hazelcast},${plugins.jbosscache},${plugins.jgroups},${plugins.infinispan},${plugins.jdg},${plugins.coherence},${plugins.process},${plugins.spymemcached}" param="plugin" xmlns:ac="antlib:net.sf.antcontrib">
+                        <ac:for list="${plugins.chm},${plugins.ehcache},${plugins.hazelcast},${plugins.jbosscache},${plugins.jgroups},${plugins.infinispan},${plugins.jdg},${plugins.coherence},${plugins.process},${plugins.spymemcached},${plugins.hibernate-orm}" param="plugin" xmlns:ac="antlib:net.sf.antcontrib">
                            <sequential>
                               <echo message="Packaging plugin @{plugin}..." />
                               <ac:if>

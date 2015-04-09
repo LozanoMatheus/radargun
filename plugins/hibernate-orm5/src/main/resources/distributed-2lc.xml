@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<infinispan xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xmlns="urn:infinispan:config:7.1"
+            xsi:schemaLocation="urn:infinispan:config:7.1 http://www.infinispan.org/schemas/infinispan-config-7.1.xsd">
+
+   <jgroups>
+      <stack-file name="hibernate-jgroups" path="${hibernate.cache.infinispan.jgroups_cfg:default-configs/default-jgroups-tcp.xml}"/>
+   </jgroups>
+
+   <cache-container name="SampleCacheManager" statistics="false" default-cache="default-cache" shutdown-hook="DEFAULT">
+      <transport stack="hibernate-jgroups" cluster="infinispan-hibernate-cluster"/>
+
+      <local-cache name="default-cache" statistics="false">
+         <transaction mode="NONE"/>
+      </local-cache>
+
+      <invalidation-cache name="entity" statistics="false">
+         <transaction mode="NON_XA"
+                      transaction-manager-lookup="org.infinispan.transaction.lookup.GenericTransactionManagerLookup"/>
+         <eviction max-entries="200000" strategy="LIRS"/>
+      </invalidation-cache>
+
+      <invalidation-cache name="immutable-entity" statistics="false">
+         <transaction mode="NONE"/>
+         <eviction max-entries="200000" strategy="LIRS"/>
+      </invalidation-cache>
+
+      <invalidation-cache name="collection" statistics="false">
+         <transaction mode="NON_XA"
+                      transaction-manager-lookup="org.infinispan.transaction.lookup.GenericTransactionManagerLookup"/>
+      </invalidation-cache>
+
+      <local-cache name="local-query" statistics="false">
+         <transaction mode="NON_XA"
+                      transaction-manager-lookup="org.infinispan.transaction.lookup.GenericTransactionManagerLookup"/>
+      </local-cache>
+
+      <invalidation-cache name="naturalid" statistics="false">
+         <transaction mode="NON_XA"
+                      transaction-manager-lookup="org.infinispan.transaction.lookup.GenericTransactionManagerLookup"/>
+      </invalidation-cache>
+
+      <local-cache name="timestamps" statistics="false">
+         <transaction mode="NONE"/>
+      </local-cache>
+
+   </cache-container>
+
+</infinispan>
