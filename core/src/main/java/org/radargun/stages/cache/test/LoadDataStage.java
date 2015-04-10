@@ -1,21 +1,15 @@
 package org.radargun.stages.cache.test;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
-import org.radargun.DistStageAck;
 import org.radargun.config.Property;
 import org.radargun.config.Stage;
-import org.radargun.stages.AbstractDistStage;
 import org.radargun.stages.cache.generators.ByteArrayValueGenerator;
 import org.radargun.stages.cache.generators.KeyGenerator;
 import org.radargun.stages.cache.generators.StringKeyGenerator;
 import org.radargun.stages.cache.generators.ValueGenerator;
 import org.radargun.stages.helpers.CacheSelector;
+import org.radargun.stages.test.LoadStage;
 import org.radargun.stages.test.TransactionMode;
 import org.radargun.traits.BasicOperations;
 import org.radargun.traits.InjectTrait;
@@ -28,9 +22,7 @@ import org.radargun.utils.Utils;
  * @author Radim Vansa &lt;rvansa@redhat.com&gt;
  */
 @Stage(doc = "Loads data into the cache using specified generators.")
-public class LoadDataStage extends AbstractDistStage {
-   @Property(doc = "Number of loaded entries after which a log entry should be written. Default is 10000.")
-   protected long logPeriod = 10000;
+public class LoadDataStage extends LoadStage {
 
    @Property(doc = "Total number of key-value entries that should be loaded into cache. Default is 100.")
    protected long numEntries = 100;
@@ -40,9 +32,6 @@ public class LoadDataStage extends AbstractDistStage {
 
    @Property(doc = "Size of the value in bytes. Default is 1000.", converter = Fuzzy.IntegerConverter.class)
    protected Fuzzy<Integer> entrySize = Fuzzy.always(1000);
-
-   @Property(doc = "The number of threads that should load the entries on one slave. Default is 10.")
-   protected int numThreads = 10;
 
    @Property(doc = "Generator of keys (transforms key ID into key object). Default is 'string'.",
          complexConverter = KeyGenerator.ComplexConverter.class)
@@ -59,20 +48,6 @@ public class LoadDataStage extends AbstractDistStage {
    @Property(doc = "This option forces local loading of all keys on all slaves in this group (not only numEntries/numNodes). Default is false.")
    protected boolean loadAllKeys = false;
 
-   @Property(doc = "If set to true, the entries are removed instead of being inserted. Default is false.")
-   private boolean remove = false;
-
-   @Property(doc = "Seed used for initialization of random generators - with same seed (and other arguments)," +
-         " the stage guarantees same entries added to the cache. By default the seed is not set.")
-   protected Long seed;
-
-   @Property(doc = "During loading phase, if the insert fails, try it again. This is the maximum number of attempts. Default is 10.")
-   protected int maxLoadAttempts = 10;
-
-   @Property(doc = "When an attempt to load an entry fails, wait this period to reduce the chances of failing again. Default is one second.",
-         converter = TimeConverter.class)
-   protected long waitOnError = 1000;
-
    @Property(doc = "Specifies if the requests should be explicitly wrapped in transactions. " +
          "Options are NEVER, ALWAYS and IF_TRANSACTIONAL: transactions are used only if " +
          "the cache configuration is transactional and transactionSize > 0. Default is IF_TRANSACTIONAL.")
@@ -85,75 +60,37 @@ public class LoadDataStage extends AbstractDistStage {
          "the benchmark will try to do one put operation every 10 ms. By default the requests are executed at maximum speed.")
    protected long requestPeriod = 0;
 
+   @Property(doc = "If set to true, the entries are removed instead of being inserted. Default is false.")
+   protected boolean remove = false;
+
    @InjectTrait(dependency = InjectTrait.Dependency.MANDATORY)
    protected BasicOperations basicOperations;
 
    @InjectTrait
    protected Transactional transactional;
 
-   protected AtomicLong entryCounter = new AtomicLong(0);
-   protected AtomicLong sizeSum = new AtomicLong(0);
-
-   public DistStageAck executeOnSlave() {
-      if (!isServiceRunning()) {
-         log.info("Not running test on this slave as service is not running.");
-         return successfulResponse();
-      }
+   @Override
+   protected void prepare() {
       if (useTransactions == TransactionMode.ALWAYS) {
          if (transactional == null) {
-            return errorResponse("Service does not support transactions");
+            throw new IllegalStateException("Service does not support transactions");
          } else if (transactionSize <= 0) {
-            return errorResponse("Transaction size was not configured");
+            throw new IllegalStateException("Transaction size was not configured");
          }
       }
 
       slaveState.put(KeyGenerator.KEY_GENERATOR, keyGenerator);
       slaveState.put(ValueGenerator.VALUE_GENERATOR, valueGenerator);
       slaveState.put(CacheSelector.CACHE_SELECTOR, cacheSelector);
-
-      List<Thread> loaders = startLoaders();
-      try {
-         stopLoaders(loaders);
-      } catch (InterruptedException e) {
-         return errorResponse("Interrupted when waiting for the loader to finish");
-      } catch (Exception e) {
-         return errorResponse("Loader failed with exception", e);
-      }
-      return successfulResponse();
    }
 
-   protected List<Thread> startLoaders() {
-      int threadBase = getExecutingSlaveIndex() * numThreads;
-      List<Thread> loaders = new ArrayList<>();
-      for (int i = 0; i < numThreads; ++i) {
-         String cacheName = cacheSelector.getCacheName(threadBase + i);
-         boolean useTransactions = this.useTransactions.use(transactional, cacheName, transactionSize);
-         long start = System.nanoTime();
-         Loader loader = useTransactions ? new TxLoader(i, getLoaderIds(i), start) : new NonTxLoader(i, getLoaderIds(i), start);
-         loaders.add(loader);
-         loader.start(); // no special synchronization needed
-      }
-      return loaders;
-   }
-
-   protected void stopLoaders(List<Thread> loaders) throws Exception {
-      for (Thread thread : loaders) {
-         if (!(thread instanceof Loader)) {
-            throw new IllegalStateException(String.format("Unexpected loader class, expected %s, was %s.",
-                  Loader.class.getName(), thread.getClass().getName()));
-         }
-         Loader loader = (Loader) thread;
-         loader.join();
-         if (loader.getException() != null) {
-            throw loader.getException();
-         }
-      }
-   }
-
-   private LoaderIds getLoaderIds(int index) {
+   protected Loader createLoader(int threadBase, int threadIndex) {
+      String cacheName = cacheSelector.getCacheName(threadBase + threadIndex);
+      boolean useTransactions = this.useTransactions.use(transactional, cacheName, transactionSize);
       int totalThreads = (loadAllKeys ? 1 : getExecutingSlaves().size()) * numThreads;
-      int threadIndex = loadAllKeys ? index : getExecutingSlaveIndex() * numThreads + index;
-      return new RangeIds(keyIdOffset + numEntries * threadIndex / totalThreads, keyIdOffset + numEntries * (threadIndex + 1) / totalThreads);
+      int globalThreadIndex = loadAllKeys ? threadIndex : threadBase + threadIndex;
+      LoaderIds loaderIds = new RangeIds(keyIdOffset + numEntries * globalThreadIndex / totalThreads, keyIdOffset + numEntries * (globalThreadIndex + 1) / totalThreads);
+      return useTransactions ? new TxLoader(threadIndex, loaderIds) : new NonTxLoader(threadIndex, loaderIds);
    }
 
    private interface LoaderIds {
@@ -202,45 +139,22 @@ public class LoadDataStage extends AbstractDistStage {
       }
    }
 
-   private abstract class Loader extends Thread {
-      protected final Random random;
-      protected final int threadIndex;
+   private abstract class CacheLoader extends Loader {
       protected final LoaderIds loaderIds;
       protected long start;
-      protected Throwable throwable;
 
-      private Loader(int index, LoaderIds loaderIds, long start) {
-         super("Loader-" + index);
+      public CacheLoader(int index, LoaderIds loaderIds) {
+         super(index);
          this.loaderIds = loaderIds;
-         threadIndex = slaveState.getSlaveIndex() * numThreads + index;
-         random = seed == null ? new Random() : new Random(seed + threadIndex);
-         this.start = start;
+         this.start = System.nanoTime();
       }
-
-      public Exception getException() {
-         return throwable == null ? null : new ExecutionException(throwable);
-      }
-
-      @Override
-      public void run() {
-         try {
-            for (; ; ) {
-               if (!loadEntry()) return;
-            }
-         } catch (Throwable t) {
-            log.error("Exception in Loader", t);
-            throwable = t;
-         }
-      }
-
-      protected abstract boolean loadEntry();
    }
 
-   private class NonTxLoader extends Loader {
+   private class NonTxLoader extends CacheLoader {
       private final BasicOperations.Cache<Object, Object> cache;
 
-      public NonTxLoader(int index, LoaderIds loaderIds, long start) {
-         super(index, loaderIds, start);
+      public NonTxLoader(int index, LoaderIds loaderIds) {
+         super(index, loaderIds);
          String cacheName = cacheSelector.getCacheName(threadIndex);
          cache = basicOperations.getCache(cacheName);
       }
@@ -282,12 +196,12 @@ public class LoadDataStage extends AbstractDistStage {
                   remove ? "remove" : "insert", key, value, maxLoadAttempts);
             throw new RuntimeException(message);
          }
-         logLoaded(1, size);
+         logLoaded(1, size, remove);
          return true;
       }
    }
 
-   private class TxLoader extends Loader {
+   private class TxLoader extends CacheLoader {
       private final BasicOperations.Cache<Object, Object> nonTxCache;
       private Transactional.Transaction tx;
       private BasicOperations.Cache cache;
@@ -296,8 +210,8 @@ public class LoadDataStage extends AbstractDistStage {
       private long txValuesSize;
       private long txBeginSeed;
 
-      public TxLoader(int index, LoaderIds loaderIds, long start) {
-         super(index, loaderIds, start);
+      public TxLoader(int index, LoaderIds loaderIds) {
+         super(index, loaderIds);
          String cacheName = cacheSelector.getCacheName(threadIndex);
          nonTxCache = basicOperations.getCache(cacheName);
       }
@@ -351,7 +265,7 @@ public class LoadDataStage extends AbstractDistStage {
          if (txCurrentSize >= transactionSize || keyId < 0) {
             try {
                tx.commit();
-               logLoaded(txCurrentSize, txValuesSize);
+               logLoaded(txCurrentSize, txValuesSize, remove);
                txAttempts = 0;
                txCurrentSize = 0;
                txValuesSize = 0;
@@ -391,20 +305,6 @@ public class LoadDataStage extends AbstractDistStage {
          if (timeToWait > 0) {
             Utils.sleep(timeToWait);
          }
-      }
-   }
-
-   private void logLoaded(long entries, long size) {
-      long prevEntryCount, currentEntryCount;
-      do {
-         prevEntryCount = entryCounter.get();
-         currentEntryCount = prevEntryCount + entries;
-      } while (!entryCounter.compareAndSet(prevEntryCount, currentEntryCount));
-      // just for logs - don't worry about those two not in sync
-      long totalSize = sizeSum.addAndGet(size);
-      if (prevEntryCount / logPeriod < currentEntryCount / logPeriod) {
-         log.infof("This node %s %d entries (~%d bytes)",
-               remove ? "removed" : "loaded", currentEntryCount, totalSize);
       }
    }
 }

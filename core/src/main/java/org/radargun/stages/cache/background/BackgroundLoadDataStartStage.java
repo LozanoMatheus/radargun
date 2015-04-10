@@ -15,8 +15,8 @@ public class BackgroundLoadDataStartStage extends LoadDataStage {
    private static final String BACKGROUND_LOADERS = "BackgroundLoaders";
 
    @Override
-   protected List<Thread> startLoaders() {
-      List<Thread> newLoaders = super.startLoaders();
+   protected List<Loader> startLoaders() {
+      List<Loader> newLoaders = super.startLoaders();
       List<Thread> previousLoaders = (List<Thread>) slaveState.get(BACKGROUND_LOADERS);
       if (previousLoaders == null) {
          slaveState.put(BACKGROUND_LOADERS, newLoaders);
@@ -27,7 +27,7 @@ public class BackgroundLoadDataStartStage extends LoadDataStage {
    }
 
    @Override
-   protected void stopLoaders(List<Thread> loaders) throws Exception {
+   protected void stopLoaders(List<Loader> loaders) throws Exception {
       // do nothing
    }
 }
