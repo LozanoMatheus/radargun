@@ -70,7 +70,6 @@ public class CrudOperationsStage extends TestStage {
    private AtomicReferenceArray loadedIds;
    private Thread queryThread;
    private Selector<StressorType> threadTypeSelector;
-//   private Semaphore createSemaphore, deleteSemaphore;
 
    private static class EntityRecord {
       int index;
@@ -101,10 +100,12 @@ public class CrudOperationsStage extends TestStage {
    @Override
    protected void prepare() {
       threadTypeSelector = new Selector.Builder<>(StressorType.class)
-            .add(StressorType.CREATE, numCreatorThreadsPerNode)
+//            .add(StressorType.CREATE, numCreatorThreadsPerNode)
             .add(StressorType.READ, numReaderThreadsPerNode)
             .add(StressorType.UPDATE, numUpdaterThreadsPerNode)
-            .add(StressorType.DELETE, numDeleterThreadsPerNode).build();
+//            .add(StressorType.DELETE, numDeleterThreadsPerNode)
+            .add(StressorType.DELETE_AND_CREATE, numCreatorThreadsPerNode + numDeleterThreadsPerNode)
+            .build();
 
       if (entityGenerator == null) {
          entityGenerator = (EntityGenerator) slaveState.get(EntityGenerator.ENTITY_GENERATOR);
@@ -126,8 +127,6 @@ public class CrudOperationsStage extends TestStage {
       }
 
       int numEntries = getNumEntries();
-//      createSemaphore = new Semaphore(Math.max(numEntries/10, 1));
-//      deleteSemaphore = new Semaphore(Math.max(numEntries/10, 1));
 
       loadedIds = new AtomicReferenceArray(numEntries);
       log.infof("Database contains %d entities", numEntries);
@@ -252,18 +251,17 @@ public class CrudOperationsStage extends TestStage {
    }
 
    private enum StressorType {
-      CREATE,
+      //CREATE,
       READ,
       UPDATE,
-      DELETE;
+      //DELETE,
+      DELETE_AND_CREATE
    }
 
    private class CrudLogic extends OperationLogic {
       private EntityManager entityManager;
       private PersistenceUnitUtil util;
       private StressorType stressorType;
-//      private int myOffset;
-//      private int myEntries;
 
       @Override
       public void init(Stressor stressor) {
@@ -272,27 +270,6 @@ public class CrudOperationsStage extends TestStage {
          util = entityManagerFactory.getPersistenceUnitUtil();
          stressor.setUseTransactions(true);
          stressorType = threadTypeSelector.select(stressor.getThreadIndex());
-         /*if (stressorType != StressorType.READ) {
-            List<Integer> executingSlaves = getExecutingSlaves();
-            int executingSlaveIndex = executingSlaves.indexOf(slaveState.getSlaveIndex());
-            int executingSlavesSize = executingSlaves.size();
-            int modifyingThreadsPerNode = numCreatorThreadsPerNode + numUpdaterThreadsPerNode + numDeleterThreadsPerNode;
-            int modifyingThreads = modifyingThreadsPerNode * executingSlavesSize;
-            int myThreadIndex = executingSlaveIndex * modifyingThreadsPerNode;
-            switch (stressorType) {
-               case CREATE:
-                  myThreadIndex += stressor.getThreadIndex();
-                  break;
-               case UPDATE:
-                  myThreadIndex += stressor.getThreadIndex() - numCreatorThreadsPerNode - numReaderThreadsPerNode;
-                  break;
-               case DELETE:
-                  myThreadIndex += stressor.getThreadIndex() - numCreatorThreadsPerNode - numReaderThreadsPerNode - numUpdaterThreadsPerNode;
-                  break;
-            }
-            myOffset = myThreadIndex * loadedIds.length() / modifyingThreads;
-            myEntries = (myThreadIndex + 1) * loadedIds.length() / modifyingThreads - myOffset;
-         } */
       }
 
       @Override
@@ -311,10 +288,10 @@ public class CrudOperationsStage extends TestStage {
          Object id;
          Object entity;
          switch (stressorType) {
-            case CREATE:
-               entity = entityGenerator.create(stressor.getRandom());
-               stressor.makeRequest(new JpaInvocations.Create(entityManager, entity));
-               break;
+//            case CREATE:
+//               entity = entityGenerator.create(stressor.getRandom());
+//               stressor.makeRequest(new JpaInvocations.Create(entityManager, entity));
+//               break;
             case READ:
                index = stressor.getRandom().nextInt(loadedIds.length());
                id = getIdNotNull(index);
@@ -328,15 +305,20 @@ public class CrudOperationsStage extends TestStage {
                entityGenerator.mutate(entity, stressor.getRandom());
                stressor.makeRequest(new JpaInvocations.Update(entityManager, entity));
                break;
-            case DELETE:
+//            case DELETE:
+//               do {
+//                  index = stressor.getRandom().nextInt(loadedIds.length());
+//                  id = getIdNotNull(index);
+//                  entity = stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id), false);
+//               } while (entity == null);
+//               stressor.makeRequest(new JpaInvocations.Remove(entityManager, entity));
+//               break;
+            case DELETE_AND_CREATE:
                do {
                   index = stressor.getRandom().nextInt(loadedIds.length());
                   id = getIdNotNull(index);
                   entity = stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id), false);
                } while (entity == null);
-//               stressor.makeRequest(new JpaInvocations.Remove(entityManager, entity));
-//               loadedIds.set(index, null);
-               // temporary:
                stressor.makeRequest(new JpaInvocations.Remove(entityManager, entity), false);
                entity = entityGenerator.create(stressor.getRandom());
                stressor.makeRequest(new JpaInvocations.Create(entityManager, entity));
