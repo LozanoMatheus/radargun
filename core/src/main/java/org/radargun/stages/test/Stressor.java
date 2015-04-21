@@ -12,8 +12,8 @@ import org.radargun.traits.Transactional;
 /**
  * Each stressor operates according to its {@link OperationLogic logic} - the instance is private to each thread.
  * After finishing the {@linkplain OperationLogic#init(Stressor) init phase}, all stressors synchronously
- * execute logic's {@link OperationLogic#run() run} method until
- * the {@link AbstractCompletion#moreToRun(int)} returns false.
+ * execute logic's {@link OperationLogic#run(org.radargun.Operation) run} method until
+ * the {@link Completion#moreToRun()} returns false.
  *
  * @author Radim Vansa &lt;rvansa@redhat.com&gt;
  */
@@ -25,6 +25,7 @@ public class Stressor extends Thread {
    private final int globalThreadIndex;
    private final OperationLogic logic;
    private final Random random;
+   private final OperationSelector operationSelector;
    private final Completion completion;
 
    private boolean useTransactions;
@@ -32,6 +33,7 @@ public class Stressor extends Thread {
    private long transactionDuration = 0;
    private Transactional.Transaction ongoingTx;
    private Statistics stats;
+   private boolean started = false;
 
    public Stressor(TestStage stage, OperationLogic logic, int globalThreadIndex, int threadIndex) {
       super("Stressor-" + threadIndex);
@@ -41,6 +43,11 @@ public class Stressor extends Thread {
       this.logic = logic;
       this.random = ThreadLocalRandom.current();
       this.completion = stage.getCompletion();
+      this.operationSelector = stage.getOperationSelector();
+   }
+
+   private boolean recording() {
+      return started && !stage.isFinished();
    }
 
    @Override
@@ -48,9 +55,7 @@ public class Stressor extends Thread {
       try {
          logic.init(this);
          stats = stage.createStatistics();
-         stage.getStartLatch().await();
 
-         stats.begin();
          runInternal();
 
       } catch (Exception e) {
@@ -60,16 +65,38 @@ public class Stressor extends Thread {
          if (stats != null) {
             stats.end();
          }
-         stage.getFinishLatch().countDown();
+         logic.destroy();
       }
    }
 
    private void runInternal() {
-      int i = 0;
-      while (completion.moreToRun(i)) {
-         Object result = null;
+      while (!stage.isTerminated()) {
+         boolean started = stage.isStarted();
+         if (started) {
+            txRemainingOperations = 0;
+            if (ongoingTx != null) {
+               endTransactionAndRegisterStats(null);
+            }
+            stats.begin();
+            this.started = started;
+            break;
+         }
+         Operation operation = operationSelector.next(random);
          try {
-            Blackhole.consume(logic.run());
+            logic.run(operation);
+         } catch (OperationLogic.RequestException e) {
+            // the exception was already logged in makeRequest
+         }
+      }
+
+      operationSelector.start();
+      completion.start();
+      int i = 0;
+      for (;;) {
+         Operation operation = operationSelector.next(random);
+         if (!completion.moreToRun()) break;
+         try {
+            logic.run(operation);
          } catch (OperationLogic.RequestException e) {
             // the exception was already logged in makeRequest
          }
@@ -99,10 +126,10 @@ public class Stressor extends Thread {
             startTxTime = startTransaction();
             transactionDuration = startTxTime;
             txRemainingOperations = stage.transactionSize;
-            stats.registerRequest(startTxTime, Transactional.BEGIN);
+            if (recording()) stats.registerRequest(startTxTime, Transactional.BEGIN);
          } catch (TransactionException e) {
-            stats.registerError(e.getOperationDuration(), Transactional.BEGIN);
-            return null;
+            if (recording()) stats.registerError(e.getOperationDuration(), Transactional.BEGIN);
+            throw new OperationLogic.RequestException(e);
          }
       }
 
@@ -114,6 +141,10 @@ public class Stressor extends Thread {
       try {
          result = invocation.invoke();
          operationDuration = System.nanoTime() - start;
+         // make sure that the return value cannot be optimized away
+         // however, we can't be 100% sure about reordering without
+         // volatile writes/reads here
+         Blackhole.consume(result);
          if (countForTx) {
             txRemainingOperations--;
          }
@@ -127,12 +158,14 @@ public class Stressor extends Thread {
       transactionDuration += operationDuration;
 
       if (useTransactions && txRemainingOperations <= 0) {
-         endTransactionAndRegisterStats(invocation.txOperation());
+         endTransactionAndRegisterStats(stage.isSingleTxType() ? invocation.txOperation() : null);
       }
-      if (successful) {
-         stats.registerRequest(operationDuration, invocation.operation());
-      } else {
-         stats.registerError(operationDuration, invocation.operation());
+      if (recording()) {
+         if (successful) {
+            stats.registerRequest(operationDuration, invocation.operation());
+         } else {
+            stats.registerError(operationDuration, invocation.operation());
+         }
       }
       if (exception != null) {
          throw new OperationLogic.RequestException(exception);
@@ -150,17 +183,21 @@ public class Stressor extends Thread {
          }
          long endTxTime = System.nanoTime() - start;
          transactionDuration += endTxTime;
-         stats.registerRequest(endTxTime, stage.commitTransactions ? Transactional.COMMIT : Transactional.ROLLBACK);
-         stats.registerRequest(transactionDuration, Transactional.DURATION);
-         if (singleTxOperation != null) {
-            stats.registerRequest(transactionDuration, singleTxOperation);
+         if (recording()) {
+            stats.registerRequest(endTxTime, stage.commitTransactions ? Transactional.COMMIT : Transactional.ROLLBACK);
+            stats.registerRequest(transactionDuration, Transactional.DURATION);
+            if (singleTxOperation != null) {
+               stats.registerRequest(transactionDuration, singleTxOperation);
+            }
          }
       } catch (Exception e) {
          long endTxTime = System.nanoTime() - start;
-         stats.registerError(endTxTime, stage.commitTransactions ? Transactional.COMMIT : Transactional.ROLLBACK);
-         stats.registerError(transactionDuration + endTxTime, Transactional.DURATION);
-         if (singleTxOperation != null) {
-            stats.registerError(transactionDuration, singleTxOperation);
+         if (recording()) {
+            stats.registerError(endTxTime, stage.commitTransactions ? Transactional.COMMIT : Transactional.ROLLBACK);
+            stats.registerError(transactionDuration + endTxTime, Transactional.DURATION);
+            if (singleTxOperation != null) {
+               stats.registerError(transactionDuration, singleTxOperation);
+            }
          }
          if (stage.logTransactionExceptions) {
             log.error("Failed to end transaction", e);
@@ -197,6 +234,10 @@ public class Stressor extends Thread {
 
    public Random getRandom() {
       return random;
+   }
+
+   public boolean isUseTransactions() {
+      return useTransactions;
    }
 
    private long startTransaction() throws TransactionException {

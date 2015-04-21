@@ -283,7 +283,10 @@ public class CrudOperationsStage extends TestStage {
       }
 
       @Override
-      public Object run() throws RequestException {
+      public void run(Operation operation) throws RequestException {
+         if (entityManager == null) {
+            entityManager = entityManagerFactory.createEntityManager();
+         }
          int index;
          Object id;
          Object entity;
@@ -295,7 +298,7 @@ public class CrudOperationsStage extends TestStage {
             case READ:
                index = stressor.getRandom().nextInt(loadedIds.length());
                id = getIdNotNull(index);
-               return stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id));
+               stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id));
             case UPDATE:
                do {
                   index = stressor.getRandom().nextInt(loadedIds.length());
@@ -324,7 +327,6 @@ public class CrudOperationsStage extends TestStage {
                stressor.makeRequest(new JpaInvocations.Create(entityManager, entity));
                break;
          }
-         return null;
       }
 
       private Object getIdNotNull(int index) {
