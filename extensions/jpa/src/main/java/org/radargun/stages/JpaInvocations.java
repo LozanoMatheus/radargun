@@ -14,6 +14,8 @@ import org.radargun.traits.JpaProvider;
 public class JpaInvocations {
    private static final Log log = LogFactory.getLog(JpaInvocations.class);
    private static final boolean trace = log.isTraceEnabled();
+   public static final Operation CREATE = JpaProvider.PERSIST.derive("Create");
+   public static final Operation UPDATE = JpaProvider.PERSIST.derive("Update");
 
    public static class Find implements Invocation {
       private final static Operation TX = JpaProvider.FIND.derive("TX");
@@ -73,7 +75,6 @@ public class JpaInvocations {
    }
 
    public static class Create extends Persist {
-      private final static Operation CREATE = JpaProvider.PERSIST.derive("Create");
       private final static Operation TX = CREATE.derive("TX");
 
       public Create(EntityManager entityManager, Object entity) {
@@ -92,7 +93,6 @@ public class JpaInvocations {
    }
 
    public static class Update extends Persist {
-      private final static Operation UPDATE = JpaProvider.PERSIST.derive("Update");
       private final static Operation TX = UPDATE.derive("TX");
 
       public Update(EntityManager entityManager, Object entity) {

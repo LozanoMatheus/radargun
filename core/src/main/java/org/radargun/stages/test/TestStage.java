@@ -399,11 +399,11 @@ public abstract class TestStage extends AbstractDistStage {
       return started;
    }
 
-   protected boolean isFinished() {
+   public boolean isFinished() {
       return finished;
    }
 
-   protected boolean isTerminated() {
+   public boolean isTerminated() {
       return terminated;
    }
 
