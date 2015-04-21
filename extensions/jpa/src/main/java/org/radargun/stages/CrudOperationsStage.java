@@ -266,7 +266,6 @@ public class CrudOperationsStage extends TestStage {
       @Override
       public void init(Stressor stressor) {
          super.init(stressor);
-         entityManager = entityManagerFactory.createEntityManager();
          util = entityManagerFactory.getPersistenceUnitUtil();
          stressor.setUseTransactions(true);
          stressorType = threadTypeSelector.select(stressor.getThreadIndex());
@@ -280,6 +279,8 @@ public class CrudOperationsStage extends TestStage {
       @Override
       public void transactionEnded() {
          entityManager.clear();
+         entityManager.close();
+         entityManager = null;
       }
 
       @Override
@@ -290,24 +291,26 @@ public class CrudOperationsStage extends TestStage {
          int index;
          Object id;
          Object entity;
-         switch (stressorType) {
+         try {
+            switch (stressorType) {
 //            case CREATE:
 //               entity = entityGenerator.create(stressor.getRandom());
 //               stressor.makeRequest(new JpaInvocations.Create(entityManager, entity));
 //               break;
-            case READ:
-               index = stressor.getRandom().nextInt(loadedIds.length());
-               id = getIdNotNull(index);
-               stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id));
-            case UPDATE:
-               do {
+               case READ:
                   index = stressor.getRandom().nextInt(loadedIds.length());
                   id = getIdNotNull(index);
-                  entity = stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id), false);
-               } while (entity == null);
-               entityGenerator.mutate(entity, stressor.getRandom());
-               stressor.makeRequest(new JpaInvocations.Update(entityManager, entity));
-               break;
+                  stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id));
+                  break;
+               case UPDATE:
+                  do {
+                     index = stressor.getRandom().nextInt(loadedIds.length());
+                     id = getIdNotNull(index);
+                     entity = stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id), false);
+                  } while (entity == null);
+                  entityGenerator.mutate(entity, stressor.getRandom());
+                  stressor.makeRequest(new JpaInvocations.Update(entityManager, entity));
+                  break;
 //            case DELETE:
 //               do {
 //                  index = stressor.getRandom().nextInt(loadedIds.length());
@@ -316,20 +319,26 @@ public class CrudOperationsStage extends TestStage {
 //               } while (entity == null);
 //               stressor.makeRequest(new JpaInvocations.Remove(entityManager, entity));
 //               break;
-            case DELETE_AND_CREATE:
-               do {
-                  index = stressor.getRandom().nextInt(loadedIds.length());
-                  id = getIdNotNull(index);
-                  entity = stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id), false);
-               } while (entity == null);
-               stressor.makeRequest(new JpaInvocations.Remove(entityManager, entity), false);
-               entity = entityGenerator.create(stressor.getRandom());
-               stressor.makeRequest(new JpaInvocations.Create(entityManager, entity));
-               break;
+               case DELETE_AND_CREATE:
+                  do {
+                     index = stressor.getRandom().nextInt(loadedIds.length());
+                     id = getIdNotNull(index);
+                     entity = stressor.makeRequest(new JpaInvocations.Find(entityManager, entityGenerator.entityClass(), id), false);
+                  } while (entity == null);
+                  stressor.makeRequest(new JpaInvocations.Remove(entityManager, entity), false);
+                  entity = entityGenerator.create(stressor.getRandom());
+                  stressor.makeRequest(new JpaInvocations.Create(entityManager, entity));
+                  break;
+            }
+         } finally {
+            if (!stressor.isUseTransactions()) {
+               entityManager.close();
+            }
          }
       }
 
       private Object getIdNotNull(int index) {
+         int initialIndex = index;
          Object id;
 //         while (!finished && !terminated) {
          for (;;) {
@@ -338,6 +347,9 @@ public class CrudOperationsStage extends TestStage {
                return id;
             }
             index = (index + 1) % loadedIds.length();
+            if (index == initialIndex) {
+               throw new RuntimeException("No set id!");
+            }
          }
 //         throw new RuntimeException("Test was terminated");
       }

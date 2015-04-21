@@ -119,11 +119,11 @@ public class LoadEntitiesStage extends LoadStage {
    }
 
    protected class EntityLoader extends Loader {
-      private final EntityManager entityManager;
       private final PersistenceUnitUtil util;
       private final long entriesToLoad;
       private final Object[] loadedIds;
 
+      private EntityManager entityManager;
       private Transactional.Transaction tx;
       private int txCurrentSize;
       private int txAttempts;
@@ -132,15 +132,20 @@ public class LoadEntitiesStage extends LoadStage {
 
       protected EntityLoader(int index, int entriesToLoad) {
          super(index);
-         entityManager = entityManagerFactory.createEntityManager();
          util = entityManagerFactory.getPersistenceUnitUtil();
          this.entriesToLoad = entriesToLoad;
          this.loadedIds = storeIds ? new Object[entriesToLoad] : null;
       }
 
       @Override
+      public void run() {
+         super.run();
+      }
+
+      @Override
       protected boolean loadEntry() {
          if (tx == null) {
+            entityManager = entityManagerFactory.createEntityManager();
             tx = transactional.getTransaction();
             tx.wrap(entityManager);
             txBeginSeed = Utils.getRandomSeed(random);
@@ -167,6 +172,7 @@ public class LoadEntitiesStage extends LoadStage {
                log.error("Failed to rollback transaction", re);
             }
             restartTx();
+            entityManager.close();
             try {
                Thread.sleep(waitOnError);
             } catch (InterruptedException e1) {
@@ -182,6 +188,7 @@ public class LoadEntitiesStage extends LoadStage {
                txAttempts = 0;
                txCurrentSize = 0;
                tx = null;
+               entityManager.close();
             } catch (Exception e) {
                log.error("Failed to commit transaction", e);
                restartTx();
