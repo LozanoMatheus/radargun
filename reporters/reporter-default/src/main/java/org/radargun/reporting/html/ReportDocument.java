@@ -484,7 +484,7 @@ public abstract class ReportDocument extends HtmlDocument {
             writeTD(String.format("%.0f&nbsp;reqs/s", operationThroughput.gross), rowStyle);
             writeTD(String.format("%.0f&nbsp;reqs/s", operationThroughput.net), rowStyle);
          } else {
-            writeTD("&nbsp;", rowStyle);
+            writeEmptyTDs(2, rowStyle);
          }
       }
       if (presentedStatistics.contains(StatisticType.DATA_THROUGHPUT)) {
