@@ -18,6 +18,7 @@ import org.radargun.utils.Projections;
  */
 public class SchedulingOperationSelector implements OperationSelector {
    private final static Log log = LogFactory.getLog(SchedulingOperationSelector.class);
+   private final static boolean trace = log.isTraceEnabled();
    private final int[] frequencies;
    private final int[] intervals;
    private final Operation[] operations;
@@ -50,35 +51,35 @@ public class SchedulingOperationSelector implements OperationSelector {
          long now = System.currentTimeMillis();
          int myOffset = offset;
          INVOCATIONS_LOOP: for (int i = 0; i < numOperations; ++i) {
-            int invocationIndex = (i + myOffset) % numOperations;
+            int operationIndex = (i + myOffset) % numOperations;
 
-            int myInterval = intervals[invocationIndex];
+            int myInterval = intervals[operationIndex];
             long currentInterval = now / myInterval;
 
             long lastInterval;
             boolean set = false;
             do {
-               lastInterval = lastSlots.get(invocationIndex);
-            } while (currentInterval > lastInterval && !(set = lastSlots.compareAndSet(invocationIndex, lastInterval, currentInterval)));
+               lastInterval = lastSlots.get(operationIndex);
+            } while (currentInterval > lastInterval && !(set = lastSlots.compareAndSet(operationIndex, lastInterval, currentInterval)));
             if (set) {
-               int frequency = frequencies[invocationIndex];
+               int frequency = frequencies[operationIndex];
                // we ignore the requests that should have been executed in previous slots;
                // if the slot is too small
                // -1 for immediatelly executed request
-               todoInvocations.set(invocationIndex, frequency - 1);
+               todoInvocations.set(operationIndex, frequency - 1);
                synchronized (this) {
                   this.notifyAll();
                }
             } else {
                int todos;
                do {
-                  todos = todoInvocations.get(invocationIndex);
+                  todos = todoInvocations.get(operationIndex);
                   if (todos <= 0) continue INVOCATIONS_LOOP;
-               } while (!todoInvocations.compareAndSet(invocationIndex, todos, todos - 1));
+               } while (!todoInvocations.compareAndSet(operationIndex, todos, todos - 1));
             }
 
             offset++;
-            return operations[invocationIndex];
+            return operations[operationIndex];
          }
          synchronized (this) {
             // there is a race that thread A sets last timestamp but B checks
@@ -131,6 +132,7 @@ public class SchedulingOperationSelector implements OperationSelector {
       }
 
       public SchedulingOperationSelector build() {
+         if (operations.isEmpty()) throw new IllegalStateException("No operations set!");
          return new SchedulingOperationSelector(operations.toArray(new Operation[operations.size()]),
                Projections.toIntArray(frequencies), Projections.toIntArray(slotSizes));
       }
