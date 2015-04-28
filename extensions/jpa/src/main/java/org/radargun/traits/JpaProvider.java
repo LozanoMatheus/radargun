@@ -16,4 +16,6 @@ public interface JpaProvider {
    Operation QUERY = Operation.register(TRAIT + ".Query");
 
    EntityManagerFactory getEntityManagerFactory();
+
+   void clearSecondLevelCaches();
 }

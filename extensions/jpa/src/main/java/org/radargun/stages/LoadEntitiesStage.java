@@ -37,6 +37,12 @@ public class LoadEntitiesStage extends LoadStage {
    @Property(doc = "Generator of the entities", complexConverter = EntityGenerator.Converter.class, optional = false)
    protected EntityGenerator entityGenerator;
 
+   @Property(doc = "Drop all entities of type specified by entity generator before loading the entities. Default is false.")
+   protected boolean dropBeforeLoad = false;
+
+   @Property(doc = "Clear second-level-cache after the entries are loaded. Default is false.")
+   protected boolean clearCacheAfterLoad = false;
+
    @InjectTrait(dependency = InjectTrait.Dependency.MANDATORY)
    protected JpaProvider jpaProvider;
 
@@ -50,6 +56,12 @@ public class LoadEntitiesStage extends LoadStage {
    protected void prepare() {
       slaveState.put(EntityGenerator.ENTITY_GENERATOR, entityGenerator);
       entityManagerFactory = jpaProvider.getEntityManagerFactory();
+      JpaUtils.dropEntities(jpaProvider, transactional, entityGenerator.entityClass());
+   }
+
+   @Override
+   protected void destroy() {
+      jpaProvider.clearSecondLevelCaches();
    }
 
    @Override
