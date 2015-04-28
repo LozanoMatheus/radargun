@@ -5,6 +5,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import javax.persistence.EntityManager;
 import javax.persistence.LockModeType;
@@ -37,6 +39,10 @@ class QueryThread extends Thread {
    private final int queryMaxResults;
    private final Class<?> entityClazz;
    private SingularAttribute idProperty;
+   private final int executingSlaves;
+   private final int myIndex;
+   private final ThreadLocalRandom random = ThreadLocalRandom.current();
+   private volatile ConcurrentLinkedQueue<Object> overflowIds = new ConcurrentLinkedQueue<>();
 
    public QueryThread(TestStage stage, Class<?> entityClazz, AtomicReferenceArray loadedIds, JpaProvider jpaProvider, Transactional transactional, int queryMaxResults) {
       super("QueryUpdater");
@@ -46,6 +52,9 @@ class QueryThread extends Thread {
       this.transactional = transactional;
       this.queryMaxResults = queryMaxResults;
       this.entityClazz = entityClazz;
+
+      executingSlaves = stage.getExecutingSlaves().size();
+      myIndex = stage.getExecutingSlaveIndex();
 
       EntityType entityType = jpaProvider.getEntityManagerFactory().getMetamodel().entity(entityClazz);
       Set<SingularAttribute> singularAttributes = entityType.getSingularAttributes();
@@ -74,25 +83,35 @@ class QueryThread extends Thread {
       tx.begin();
       int existing = 0;
       try {
-         for (int offset = 0;; offset += queryMaxResults) {
-            List<Object> list = dirtyList(entityManager, offset, queryMaxResults);
+         List<Object> list;
+         Object maxId = null;
+         do {
+            list = dirtyList(entityManager, maxId);
             for (Object id : list) {
                EntityRecord record = idToIndex.get(id);
                if (record != null) {
+                  if (!found[record.index]) {
+                     ++existing;
+                  }
                   found[record.index] = true;
                   record.found = true;
-                  ++existing;
                } else {
                   newIds.add(id);
                }
             }
-            if (list.size() < queryMaxResults) break;
-         }
-      } finally {
+            if (!list.isEmpty()) {
+               maxId = list.get(list.size() - 1);
+            }
+         } while (list.size() == queryMaxResults);
          tx.commit();
+         tx = null;
+      } finally {
+         if (tx != null) {
+            tx.rollback();
+         };
          entityManager.close();
       }
-      log.debugf("Finished dirty enumeration, %d existing, %d new IDs", existing, newIds.size());
+      log.debugf("Finished dirty enumeration, %d indexed ids, %d existing, %d new IDs", idToIndex.size(), existing, newIds.size());
 
       for (Iterator<EntityRecord> iterator = idToIndex.values().iterator(); iterator.hasNext(); ) {
          EntityRecord record = iterator.next();
@@ -103,13 +122,13 @@ class QueryThread extends Thread {
          }
       }
 
-      int newIdsIndex = 0;
+      int holeIndex = 0;
       for (int index = 0; index < found.length; ++index) {
          if (found[index]) {
             continue;
          }
-         if (newIdsIndex < newIds.size()) {
-            Object newId = newIds.get(newIdsIndex);
+         if (holeIndex < newIds.size()) {
+            Object newId = newIds.get(holeIndex);
             if (trace) log.tracef("Replacing removed entry with %s on %d", newId, index);
             loadedIds.set(index, newId);
             idToIndex.put(newId, new EntityRecord(index, false));
@@ -117,25 +136,47 @@ class QueryThread extends Thread {
             if (trace) log.tracef("Nothing to replace with on %d", index);
             loadedIds.set(index, null);
          }
-         newIdsIndex++;
+         holeIndex++;
       }
-      if (newIdsIndex < newIds.size()) {
-         log.debugf("Finished dirty update, %d new entities ignored", newIds.size() - newIdsIndex);
+      if (holeIndex < newIds.size()) {
+         log.debugf("Finished dirty update, %d indexed ids, %d new entities overflowing", idToIndex.size(), newIds.size() - holeIndex);
+         ConcurrentLinkedQueue<Object> overflowIds = new ConcurrentLinkedQueue<>();
+         while (holeIndex < newIds.size()) {
+            // due to the order of iteration, we would probably delete the last entities.
+            // To put random entities into the overflow, let's mix them randomly into the loadedIds and overflow the old ones
+            Object id = newIds.get(holeIndex);
+            int index = random.nextInt(loadedIds.length());
+            Object prevId = loadedIds.getAndSet(index, id);
+            idToIndex.remove(prevId);
+            idToIndex.put(id, new EntityRecord(index, false));
+            // insert only some ids to prevent transaction failures on other slaves
+            if (prevId.hashCode() % executingSlaves == myIndex) {
+               overflowIds.add(prevId);
+            }
+            holeIndex++;
+         }
+         this.overflowIds = overflowIds;
       } else {
-         log.debugf("Finished dirty update, %d left empty", newIdsIndex - newIds.size());
+         log.debugf("Finished dirty update, %d indexed ids, %d left empty", idToIndex.size(), holeIndex - newIds.size());
       }
 
    }
 
-   private List<Object> dirtyList(EntityManager entityManager, int offset, int maxResults) {
+   private List<Object> dirtyList(EntityManager entityManager, Object maxId) {
       CriteriaBuilder cb = entityManager.getCriteriaBuilder();
       CriteriaQuery<Object> query = cb.createQuery(Object.class);
       Root root = query.from(entityClazz);
       Path idPath = root.get(idProperty);
-      query.select(idPath);
+      query.select(idPath).orderBy(cb.asc(idPath));
+      if (maxId != null) {
+         query.where(cb.gt(idPath, (Number) maxId));
+      }
       return entityManager.createQuery(query).setLockMode(LockModeType.NONE)
-            .setFirstResult(offset).setMaxResults(maxResults)
-            .getResultList();
+            .setMaxResults(queryMaxResults).getResultList();
+   }
+
+   public Object getNextOverflowId() {
+      return overflowIds.poll();
    }
 
    private static class EntityRecord {

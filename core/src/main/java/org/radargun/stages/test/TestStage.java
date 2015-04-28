@@ -435,7 +435,7 @@ public abstract class TestStage extends AbstractDistStage {
    }
 
    protected static class StatisticsAck extends DistStageAck {
-      private final List<List<Statistics>> iterations;
+      public final List<List<Statistics>> iterations;
 
       protected StatisticsAck(SlaveState slaveState, List<List<Statistics>> iterations) {
          super(slaveState);

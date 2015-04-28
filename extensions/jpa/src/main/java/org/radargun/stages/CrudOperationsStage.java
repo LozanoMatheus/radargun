@@ -5,8 +5,6 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;
-import javax.persistence.PersistenceUnitUtil;
-import javax.persistence.metamodel.SingularAttribute;
 
 import org.radargun.Operation;
 import org.radargun.config.Property;
@@ -204,7 +202,7 @@ public class CrudOperationsStage extends TestStage {
       private Object getIdNotNull(int index) {
          int initialIndex = index;
          Object id;
-         while (!finished && !terminated) {
+         while (!terminated) {
             id = loadedIds.get(index);
             if (id != null) {
                return id;
@@ -214,7 +212,7 @@ public class CrudOperationsStage extends TestStage {
                throw new RuntimeException("No set id!");
             }
          }
-         throw new RuntimeException("Test was finished/terminated");
+         throw new RuntimeException("Test was terminated");
       }
    }
 }

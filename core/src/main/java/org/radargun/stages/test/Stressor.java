@@ -70,42 +70,44 @@ public class Stressor extends Thread {
    }
 
    private void runInternal() {
-      while (!stage.isTerminated()) {
-         boolean started = stage.isStarted();
-         if (started) {
-            txRemainingOperations = 0;
-            if (ongoingTx != null) {
-               endTransactionAndRegisterStats(null);
+      try {
+         while (!stage.isTerminated()) {
+            boolean started = stage.isStarted();
+            if (started) {
+               txRemainingOperations = 0;
+               if (ongoingTx != null) {
+                  endTransactionAndRegisterStats(null);
+               }
+               stats.begin();
+               this.started = started;
+               break;
             }
-            stats.begin();
-            this.started = started;
-            break;
+            Operation operation = operationSelector.next(random);
+            try {
+               logic.run(operation);
+            } catch (OperationLogic.RequestException e) {
+               // the exception was already logged in makeRequest
+            }
          }
-         Operation operation = operationSelector.next(random);
-         try {
-            logic.run(operation);
-         } catch (OperationLogic.RequestException e) {
-            // the exception was already logged in makeRequest
-         }
-      }
 
-      operationSelector.start();
-      completion.start();
-      int i = 0;
-      for (;;) {
-         Operation operation = operationSelector.next(random);
-         if (!completion.moreToRun()) break;
-         try {
-            logic.run(operation);
-         } catch (OperationLogic.RequestException e) {
-            // the exception was already logged in makeRequest
+         operationSelector.start();
+         completion.start();
+         int i = 0;
+         for (; ; ) {
+            Operation operation = operationSelector.next(random);
+            if (!completion.moreToRun()) break;
+            try {
+               logic.run(operation);
+            } catch (OperationLogic.RequestException e) {
+               // the exception was already logged in makeRequest
+            }
+            i++;
+            completion.logProgress(i);
          }
-         i++;
-         completion.logProgress(i);
-      }
-
-      if (txRemainingOperations > 0) {
-         endTransactionAndRegisterStats(null);
+      } finally {
+         if (txRemainingOperations > 0) {
+            endTransactionAndRegisterStats(null);
+         }
       }
    }
 
