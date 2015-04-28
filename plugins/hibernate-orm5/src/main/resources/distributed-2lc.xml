@@ -7,40 +7,40 @@
       <stack-file name="hibernate-jgroups" path="${hibernate.cache.infinispan.jgroups_cfg:default-configs/default-jgroups-tcp.xml}"/>
    </jgroups>
 
-   <cache-container name="SampleCacheManager" statistics="false" default-cache="default-cache" shutdown-hook="DEFAULT">
+   <cache-container name="SampleCacheManager" statistics="${infinispan.stats.enabled:false}" default-cache="default-cache" shutdown-hook="DEFAULT">
       <transport stack="hibernate-jgroups" cluster="infinispan-hibernate-cluster"/>
 
-      <local-cache name="default-cache" statistics="false">
+      <local-cache name="default-cache" statistics="${infinispan.stats.enabled:false}">
          <transaction mode="NONE"/>
       </local-cache>
 
-      <invalidation-cache name="entity" statistics="false">
+      <invalidation-cache name="entity" statistics="${infinispan.stats.enabled:false}">
          <transaction mode="NON_XA"
                       transaction-manager-lookup="org.infinispan.transaction.lookup.GenericTransactionManagerLookup"/>
-         <eviction max-entries="200000" strategy="LIRS"/>
+         <eviction max-entries="${infinispan.eviction.maxentries:1000000}" strategy="LIRS"/>
       </invalidation-cache>
 
-      <invalidation-cache name="immutable-entity" statistics="false">
+      <invalidation-cache name="immutable-entity" statistics="${infinispan.stats.enabled:false}">
          <transaction mode="NONE"/>
-         <eviction max-entries="200000" strategy="LIRS"/>
+         <eviction max-entries="${infinispan.eviction.maxentries:1000000}" strategy="LIRS"/>
       </invalidation-cache>
 
-      <invalidation-cache name="collection" statistics="false">
+      <invalidation-cache name="collection" statistics="${infinispan.stats.enabled:false}">
          <transaction mode="NON_XA"
                       transaction-manager-lookup="org.infinispan.transaction.lookup.GenericTransactionManagerLookup"/>
       </invalidation-cache>
 
-      <local-cache name="local-query" statistics="false">
+      <local-cache name="local-query" statistics="${infinispan.stats.enabled:false}">
          <transaction mode="NON_XA"
                       transaction-manager-lookup="org.infinispan.transaction.lookup.GenericTransactionManagerLookup"/>
       </local-cache>
 
-      <invalidation-cache name="naturalid" statistics="false">
+      <invalidation-cache name="naturalid" statistics="${infinispan.stats.enabled:false}">
          <transaction mode="NON_XA"
                       transaction-manager-lookup="org.infinispan.transaction.lookup.GenericTransactionManagerLookup"/>
       </invalidation-cache>
 
-      <local-cache name="timestamps" statistics="false">
+      <local-cache name="timestamps" statistics="${infinispan.stats.enabled:false}">
          <transaction mode="NONE"/>
       </local-cache>
 
