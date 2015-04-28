@@ -5,6 +5,7 @@
    <persistence-unit name="default">
       <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
       <class>org.radargun.jpa.entities.Constant</class>
+      <class>org.radargun.jpa.entities.Constant2</class>
       <properties>
          <property name="hibernate.archive.autodetection" value="class" />
       </properties>
