@@ -19,10 +19,13 @@ import org.hibernate.FlushMode;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.c3p0.internal.C3P0ConnectionProvider;
 import org.hibernate.cache.infinispan.InfinispanRegionFactory;
+import org.hibernate.cache.infinispan.entity.EntityRegionImpl;
 import org.hibernate.cfg.AvailableSettings;
 import org.hibernate.dialect.H2Dialect;
 import org.hibernate.dialect.PostgreSQL94Dialect;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.hikaricp.internal.HikariCPConnectionProvider;
+import org.infinispan.stats.Stats;
 import org.radargun.Directories;
 import org.radargun.Service;
 import org.radargun.config.AnnotatedHelper;
@@ -32,6 +35,7 @@ import org.radargun.config.Property;
 import org.radargun.config.XmlConverter;
 import org.radargun.logging.Log;
 import org.radargun.logging.LogFactory;
+import org.radargun.traits.InternalsExposition;
 import org.radargun.traits.JpaProvider;
 import org.radargun.traits.Lifecycle;
 import org.radargun.traits.ProvidesTrait;
@@ -44,7 +48,7 @@ import org.radargun.utils.Utils;
  * @author Radim Vansa &lt;rvansa@redhat.com&gt;
  */
 @Service(doc = "Service for Hibernate ORM 5.x")
-public class HibernateOrm5Service implements Lifecycle, JpaProvider {
+public class HibernateOrm5Service implements Lifecycle, JpaProvider, InternalsExposition {
    private static Log log = LogFactory.getLog(HibernateOrm5Service.class);
 
    @Property(doc = "Persistence unit to be used. Default is 'default'")
@@ -98,6 +102,11 @@ public class HibernateOrm5Service implements Lifecycle, JpaProvider {
       return new HibernateOrm5Transactional(this, transactionTimeout);
    }
 
+   @ProvidesTrait
+   public InternalsExposition createInternalsExposition() {
+      return this;
+   }
+
    @Override
    public void start() {
       try {
@@ -146,6 +155,12 @@ public class HibernateOrm5Service implements Lifecycle, JpaProvider {
       return entityManagerFactory;
    }
 
+   @Override
+   public void clearSecondLevelCaches() {
+      SessionFactoryImplementor sfi = entityManagerFactory.unwrap(SessionFactoryImplementor.class);
+      sfi.getCache().evictAllRegions();
+   }
+
    private EntityManagerFactory createEntityManagerFactory() {
       Map<String, Object> propertyMap = new HashMap<>();
       database.applyProperties(propertyMap);
@@ -175,6 +190,68 @@ public class HibernateOrm5Service implements Lifecycle, JpaProvider {
       log.debug("Persistence properties: " + propertyMap);
       propertyMap.put(org.hibernate.jpa.AvailableSettings.LOADED_CLASSES, entityClasses);
       return Persistence.createEntityManagerFactory(persistenceUnit, propertyMap);
+   }
+
+   @Override
+   public Map<String, Number> getValues() {
+      return Collections.EMPTY_MAP;
+   }
+
+   @Override
+   public String getCustomStatistics(String type) {
+      String[] parts = type.split(":");
+      if (parts.length != 3) {
+         log.warnf("Unknown type '%s'", type);
+      }
+      if ("second-level-cache".equals(parts[0])) {
+         EntityRegionImpl region = getEntityRegion(parts[1]);
+         if (region == null) {
+            return null;
+         }
+         Stats stats = region.getCache().getStats();
+         switch (parts[2]) {
+            case "hits":
+               return String.valueOf(stats.getHits());
+            case "misses":
+               return String.valueOf(stats.getMisses());
+            case "numberOfEntries":
+               return String.valueOf(stats.getCurrentNumberOfEntries());
+            default:
+               log.warnf("Unknown property '%s'", parts[2]);
+               return null;
+         }
+      } else {
+         log.warnf("Unknown part '%s'", parts[0]);
+      }
+      return null;
+   }
+
+   @Override
+   public void resetCustomStatistics(String type) {
+      String[] parts = type.split(":");
+      if (parts.length != 2) throw new IllegalArgumentException(type);
+      if ("second-level-cache".equals(parts[0])) {
+         EntityRegionImpl region = getEntityRegion(parts[1]);
+         if (region == null) return;
+         Stats stats = region.getCache().getStats();
+         stats.reset();
+      } else {
+         log.warnf("Unknown part '%s'", parts[0]);
+      }
+   }
+
+   protected EntityRegionImpl getEntityRegion(String regionName) {
+      SessionFactoryImplementor sfi = entityManagerFactory.unwrap(SessionFactoryImplementor.class);
+      if (!sfi.getSettings().isSecondLevelCacheEnabled()) {
+         log.warn("Second-level cache is not enabled");
+         return null;
+      }
+      EntityRegionImpl region = (EntityRegionImpl) sfi.getSecondLevelCacheRegion(regionName);
+      if (region == null) {
+         log.warnf("Cannot find region '%s' available are: %s", regionName, sfi.getAllSecondLevelCacheRegions().keySet());
+         return null;
+      }
+      return region;
    }
 
    protected enum Hbm2DdlMode {
