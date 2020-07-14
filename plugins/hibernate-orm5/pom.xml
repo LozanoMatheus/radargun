@@ -27,7 +27,7 @@
       <version.ironjacamar>1.0.31.Final</version.ironjacamar>
       <version.shrinkwrap>1.1.2</version.shrinkwrap>
       <version.shrinkwrap.descriptors>1.1.0-beta-1</version.shrinkwrap.descriptors>
-      <version.infinispan>7.2.0-SNAPSHOT</version.infinispan>
+      <version.infinispan>10.0.0.Final</version.infinispan>
    </properties>
 
    <profiles>
